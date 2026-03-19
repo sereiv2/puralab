@@ -1303,8 +1303,29 @@
 
         if (error) {
           alert("Upload failed");
+          console.log(error);
         } else {
           alert("Upload success");
+          loadFiles(); // 👈 ADD THIS LINE RIGHT HERE
+        }
+        async function loadFiles() {
+          const { data, error } = await client.storage
+            .from("uploads")
+            .list("public");
+
+          if (error) {
+            console.log(error);
+            return;
+          }
+
+          const fileArea = document.getElementById("fileArea");
+          fileArea.innerHTML = "";
+
+          data.forEach((file) => {
+            const div = document.createElement("div");
+            div.textContent = file.name;
+            fileArea.appendChild(div);
+          });
         }
       }
     </script>
@@ -1314,7 +1335,10 @@
         Pura<span>Lab</span></a
       >
       <ul class="nav-center">
-  
+        <li><a href="pura-lab-ea.html">EA Systems</a></li>
+        <li><a href="pura-lab-journal.html">Journal</a></li>
+        <li><a href="pura-lab-plans.html">Plans</a></li>
+        <li><a href="pura-lab-memories.html">Memories</a></li>
         <li><a href="pura-lab-files.html" class="active">Database</a></li>
       </ul>
       <div class="nav-right">
@@ -2399,5 +2423,8 @@
       renderAll();
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <script>
+      window.onload = loadFiles;
+    </script>
   </body>
 </html>
