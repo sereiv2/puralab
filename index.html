@@ -409,27 +409,80 @@ function toggleTheme(){
 // ══════════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════════
-let files = [];       // {id,name,ext,type,size,date,src,cat,tags,note}
-let categories = [    // built-in + user-added
-  {id:'all',   name:'All Files',    icon:'🗂️',  builtin:true},
-  {id:'recent',name:'Recent',       icon:'🕐',  builtin:true},
-  {id:'starred',name:'Starred',     icon:'⭐',  builtin:true},
-  // auto-type groups
-  {id:'t-pdf', name:'Documents',    icon:'📄',  builtin:true, typeGroup:'pdf'},
-  {id:'t-img', name:'Images',       icon:'🖼️',  builtin:true, typeGroup:'img'},
-  {id:'t-vid', name:'Videos',       icon:'🎬',  builtin:true, typeGroup:'vid'},
-  {id:'t-aud', name:'Audio',        icon:'🎵',  builtin:true, typeGroup:'aud'},
-  {id:'t-xls', name:'Spreadsheets', icon:'📊',  builtin:true, typeGroup:'xls'},
-  {id:'t-doc', name:'Word Docs',    icon:'📘',  builtin:true, typeGroup:'doc'},
-  {id:'t-code',name:'Code',         icon:'💻',  builtin:true, typeGroup:'code'},
+let files = [];
+const BUILTIN_CATS = [
+  {id:'all',    name:'All Files',    icon:'🗂️',  builtin:true},
+  {id:'recent', name:'Recent',       icon:'🕐',  builtin:true},
+  {id:'starred',name:'Starred',      icon:'⭐',  builtin:true},
+  {id:'t-pdf',  name:'Documents',    icon:'📄',  builtin:true, typeGroup:'pdf'},
+  {id:'t-img',  name:'Images',       icon:'🖼️',  builtin:true, typeGroup:'img'},
+  {id:'t-vid',  name:'Videos',       icon:'🎬',  builtin:true, typeGroup:'vid'},
+  {id:'t-aud',  name:'Audio',        icon:'🎵',  builtin:true, typeGroup:'aud'},
+  {id:'t-xls',  name:'Spreadsheets', icon:'📊',  builtin:true, typeGroup:'xls'},
+  {id:'t-doc',  name:'Word Docs',    icon:'📘',  builtin:true, typeGroup:'doc'},
+  {id:'t-code', name:'Code',         icon:'💻',  builtin:true, typeGroup:'code'},
 ];
-let starredIds = new Set();
+let categories = [...BUILTIN_CATS];
 let activeFilter = 'all';
 let activeTypeFilter = '';
 let currentView = 'grid';
 let editingId = null;
 let editTags = [];
 let viewingId = null;
+
+// ══════════════════════════════════════════════════════
+// PERSIST — save & load everything to localStorage
+// ══════════════════════════════════════════════════════
+function saveFiles(){
+  try {
+    // Save file metadata only — skip large base64 src for cloud files
+    const toSave = files.map(f => ({
+      id:       f.id,
+      name:     f.name,
+      ext:      f.ext,
+      type:     f.type,
+      size:     f.size,
+      date:     f.date,
+      // Only save src if it's a small local file (< 5MB base64)
+      src:      f.blobUrl ? null : (f.src && f.src.length < 5000000 ? f.src : null),
+      blobUrl:  f.blobUrl || null,
+      cat:      f.cat,
+      tags:     f.tags     || [],
+      note:     f.note     || '',
+      starred:  f.starred  || false,
+      fromCloud: f.fromCloud || false,
+    }));
+    localStorage.setItem('pura-db-files', JSON.stringify(toSave));
+  } catch(e) {
+    console.warn('Could not save files to localStorage:', e.message);
+  }
+}
+
+function loadFiles(){
+  try {
+    const saved = JSON.parse(localStorage.getItem('pura-db-files')) || [];
+    files = saved.filter(f => f.id && f.name); // basic validation
+  } catch(e) {
+    files = [];
+  }
+}
+
+function saveCategories(){
+  const userCats = categories.filter(c => !c.builtin);
+  localStorage.setItem('pura-db-cats', JSON.stringify(userCats));
+}
+
+function loadCategories(){
+  try {
+    const saved = JSON.parse(localStorage.getItem('pura-db-cats')) || [];
+    categories = [...BUILTIN_CATS];
+    saved.forEach(c => {
+      if(!categories.find(x => x.id === c.id)) categories.push(c);
+    });
+  } catch(e) {
+    categories = [...BUILTIN_CATS];
+  }
+}
 
 // ══════════════════════════════════════════════════════
 // HELPERS
@@ -494,6 +547,7 @@ async function handleUpload(fileList){
       cat: 'uncategorized', tags: [], note: '', starred: false
     };
     files.unshift(fileObj);
+    saveFiles();
     renderAll();
 
     // 2. Upload to Vercel Blob in background
@@ -502,10 +556,11 @@ async function handleUpload(fileList){
       const blobUrl = await uploadToVercelBlob(f, id);
       const target  = files.find(x=>x.id===id);
       if(target){
-        target.blobUrl  = blobUrl;
+        target.blobUrl   = blobUrl;
         target.uploading = false;
-        target.src      = blobUrl; // swap to cloud URL
+        target.src       = blobUrl;
       }
+      saveFiles();
       hideUploadProgress(id);
       renderAll();
       showToast(`☁️ "${f.name}" uploaded to cloud`,'green');
@@ -513,6 +568,7 @@ async function handleUpload(fileList){
       console.error('Blob upload failed:', err);
       const target = files.find(x=>x.id===id);
       if(target){ target.uploading=false; target.blobUrl=null; }
+      saveFiles();
       hideUploadProgress(id);
       renderAll();
       showToast(`Local only — cloud upload failed: ${err.message}`,'warn');
@@ -893,6 +949,7 @@ function toggleStar(id){
   const f = files.find(x=>x.id===id);
   if(!f) return;
   f.starred = !f.starred;
+  saveFiles();
   renderAll();
   showToast(f.starred?'⭐ Starred':'Unstarred','green');
 }
@@ -900,9 +957,9 @@ function toggleStar(id){
 function deleteFile(id){
   const f = files.find(x=>x.id===id);
   if(!f) return;
-  // Delete from Vercel Blob if it has a cloud URL
   if(f.blobUrl) deleteFromBlob(f.blobUrl);
   files = files.filter(x=>x.id!==id);
+  saveFiles();
   renderAll();
   showToast('File removed','warn');
 }
@@ -1026,6 +1083,7 @@ function saveEdit(){
   f.cat  = document.getElementById('edit-cat').value;
   f.tags = [...editTags];
   f.note = document.getElementById('edit-note').value.trim();
+  saveFiles();
   closeEditModal();
   renderAll();
   showToast('File updated','green');
@@ -1113,6 +1171,7 @@ function showToast(msg,type='green'){
 // INIT
 // ══════════════════════════════════════════════════════
 loadCategories();
+loadFiles();
 renderAll();
 // Try to load existing files from Vercel Blob
 loadFromBlob();
